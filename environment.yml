@@ -1,0 +1,24 @@
+name: stock-platform
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.13
+  - pip
+  # Database
+  - psycopg2
+  - sqlalchemy
+  # Data handling
+  - pandas
+  - numpy
+  # HTTP Client
+  - requests
+  - python-dotenv
+  # Spyder kernel für das Environment
+  - spyder-kernels
+  # Jupyter (optional, falls du Notebooks nutzen willst)
+  - ipykernel
+  
+  # Pip-only packages
+  - pip:
+    - timescaledb
