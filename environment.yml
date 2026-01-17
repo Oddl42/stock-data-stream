@@ -14,11 +14,19 @@ dependencies:
   # HTTP Client
   - requests
   - python-dotenv
+  # Visualization libraries
+  - panel
+  - plotly
+  - bokeh
+  - hvplot
+  - param
+  - holoviews
   # Spyder kernel für das Environment
   - spyder-kernels
   # Jupyter (optional, falls du Notebooks nutzen willst)
   - ipykernel
-  
+
   # Pip-only packages
   - pip:
     - timescaledb
+    - pandas-ta

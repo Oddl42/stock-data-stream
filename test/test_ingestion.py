@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+2#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Created on Wed Jan 14 22:03:21 2026
@@ -59,9 +59,9 @@ def test_multiple_symbols():
     
     ingestion = StockDataIngestion()
     
-    symbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA']
+    symbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META', 'NFLX', 'FLNC', 'TTD', 'HIMS']
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=90)  # 3 Monate
+    start_date = end_date - timedelta(days=720)  # 3 Monate
     
     ingestion.ingest_multiple_symbols(
         symbols=symbols,
@@ -176,7 +176,7 @@ def main():
         print("Welchen Test möchtest du ausführen?")
         print("="*60)
         print("1 - Einzelnes Symbol (AAPL, 30 Tage, täglich)")
-        print("2 - Mehrere Symbole (AAPL, MSFT, GOOGL, AMZN, TSLA, 90 Tage)")
+        print("2 - Mehrere Symbole ('AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META'...  1 Jahr)")
         print("3 - Intraday-Daten (AAPL, 7 Tage, 5-Minuten)")
         print("4 - Alle Tests ausführen")
         print("5 - Daten verifizieren")
