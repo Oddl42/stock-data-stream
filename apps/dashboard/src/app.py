@@ -1,48 +1,66 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Stock Data Dashboard - Hauptanwendung mit technischen Indikatoren
+Created on Sun Jan 18 00:08:52 2026
+
+@author: twi-dev
+"""
+
+"""
+Stock Data Dashboard - Mit Ticker-Verwaltung
 """
 import panel as pn
 import pandas as pd
 from datetime import datetime, timedelta
 import os
 
-# GTK-Warnung unterdrücken
 os.environ['NO_AT_BRIDGE'] = '1'
 
 # Panel extensions laden
 pn.extension('plotly', 'tabulator')
 
-# Imports aus unserem Projekt
+# Imports
 from apps.data_ingestion.src.database import engine
+from apps.data_ingestion.src.massive_client import MassiveClient
 from apps.dashboard.components.indicators import TechnicalIndicators
+from apps.dashboard.src.ticker_db import TickerDatabase
 from sqlalchemy import text
 
-# Panel-Template konfigurieren
 pn.config.sizing_mode = 'stretch_width'
 
 class StockDashboard:
-    """Haupt-Dashboard-Klasse mit technischen Indikatoren"""
+    """Haupt-Dashboard-Klasse mit Ticker-Verwaltung"""
     
     def __init__(self):
         self.title = "📈 Stock Data Platform"
         self.indicators = TechnicalIndicators()
+        self.massive_client = MassiveClient()
+        self.ticker_db = TickerDatabase()
+        
         self.setup_data()
         self.create_widgets()
+        self.create_ticker_widgets()  # NEU
         self.create_layout()
+        
+        pn.state.onload(lambda: self.update_chart())
     
     def setup_data(self):
-        """Lädt verfügbare Symbole aus der Datenbank"""
+        """Lädt verfügbare Symbole (aus DB + ausgewählte Ticker)"""
+        # Symbole aus Datenbank
         with engine.connect() as conn:
             result = conn.execute(text("""
-                SELECT DISTINCT symbol 
-                FROM stock_ohlcv 
-                ORDER BY symbol
+                SELECT DISTINCT symbol FROM stock_ohlcv ORDER BY symbol
             """))
-            self.available_symbols = [row[0] for row in result]
+            db_symbols = [row[0] for row in result]
         
-        if not self.available_symbols:
-            self.available_symbols = ['Keine Daten verfügbar']
+        # Ausgewählte Ticker aus SQLite
+        selected = self.ticker_db.get_selected_tickers()
+        selected_symbols = [t['ticker'] for t in selected]
+        
+        # Kombiniere beide Listen (ohne Duplikate)
+        all_symbols = sorted(list(set(db_symbols + selected_symbols)))
+        
+        self.available_symbols = all_symbols if all_symbols else ['Keine Daten verfügbar']
     
     def create_widgets(self):
         """Erstellt interaktive Widgets mit Auto-Update"""
@@ -56,15 +74,47 @@ class StockDashboard:
         )
         self.symbol_select.param.watch(self.update_chart, 'value')
         
-        # Zeitraum-Auswahl
-        self.date_range_slider = pn.widgets.DateRangeSlider(
-            name='Zeitraum',
-            start=datetime.now() - timedelta(days=365),
-            end=datetime.now(),
-            value=(datetime.now() - timedelta(days=90), datetime.now()),
-            step=86400000
+        # Schnellauswahl-Buttons für Zeiträume
+        self.quick_range_buttons = pn.widgets.RadioButtonGroup(
+            name='Schnellauswahl',
+            options={
+                '1 Woche': 7,
+                '1 Monat': 30,
+                '3 Monate': 90,
+                '6 Monate': 180,
+                '1 Jahr': 365
+            },
+            button_type='default'
         )
-        self.date_range_slider.param.watch(self.update_chart, 'value_throttled')
+        
+        # Callback für Schnellauswahl - WICHTIG: .date() verwenden!
+        def quick_range_callback(event):
+            if event.new:
+                days = event.new
+                self.end_date_picker.value = datetime.now().date()  # ← .date()!
+                self.start_date_picker.value = (datetime.now() - timedelta(days=days)).date()  # ← .date()!
+        
+        self.quick_range_buttons.param.watch(quick_range_callback, 'value')
+        
+        # NEU: Start-Datum (Popup-Kalender) - WICHTIG: .date() verwenden!
+        self.start_date_picker = pn.widgets.DatePicker(
+            name='📅 Start-Datum',
+            value=(datetime.now() - timedelta(days=90)).date(),  # ← .date() hinzugefügt!
+            start=(datetime.now() - timedelta(days=365)).date(),  # ← .date() hinzugefügt!
+            end=datetime.now().date(),                             # ← .date() hinzugefügt!
+            width=200
+        )
+        self.start_date_picker.param.watch(self.update_chart, 'value')
+        
+        # NEU: End-Datum (Popup-Kalender) - WICHTIG: .date() verwenden!
+        self.end_date_picker = pn.widgets.DatePicker(
+            name='📅 End-Datum',
+            value=datetime.now().date(),                           # ← .date() hinzugefügt!
+            start=(datetime.now() - timedelta(days=365)).date(),  # ← .date() hinzugefügt!
+            end=datetime.now().date(),                             # ← .date() hinzugefügt!
+            width=200
+        )
+        self.end_date_picker.param.watch(self.update_chart, 'value')
         
         # Interval-Auswahl
         self.interval_select = pn.widgets.Select(
@@ -75,16 +125,7 @@ class StockDashboard:
         )
         self.interval_select.param.watch(self.update_chart, 'value')
         
-        # NEU: Chart-Typ Auswahl
-        self.chart_type_select = pn.widgets.RadioButtonGroup(
-            name='Chart-Typ',
-            options=['Candlestick', 'Linie', 'Beides'],
-            value='Candlestick',
-            button_type='primary'
-        )
-        self.chart_type_select.param.watch(self.update_chart, 'value')
-        
-        # Erweiterte Chart-Typ-Auswahl
+        # Chart-Typ Auswahl
         self.chart_type_select = pn.widgets.Select(
             name='Chart-Typ',
             options={
@@ -96,11 +137,11 @@ class StockDashboard:
                 '🔀 Beides': 'both'
             },
             value='candlestick',
-            width=200
+            width=220
         )
-
+        self.chart_type_select.param.watch(self.update_chart, 'value')
         
-        # Indikator-Auswahl (Multi-Select)
+        # Indikator-Auswahl
         self.indicator_select = pn.widgets.MultiChoice(
             name='Technische Indikatoren',
             options={
@@ -132,27 +173,38 @@ class StockDashboard:
             width=30,
             height=30
         )
-    
+
     def load_data(self):
-        """Lädt Daten aus der Datenbank mit SQL-seitiger Typ-Konvertierung"""
+        """Lädt Daten aus der Datenbank"""
         try:
             symbol = self.symbol_select.value
-            
-            # Sichere Abfrage der date_range_slider Werte
-            date_range = self.date_range_slider.value
-            if date_range is None or not isinstance(date_range, tuple):
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=90)
-                print(f"⚠️  DateRange war None, verwende Default: {start_date.date()} bis {end_date.date()}")
-            else:
-                start_date, end_date = date_range
-            
             interval = self.interval_select.value
             
-            print(f"📊 Lade Daten: {symbol}, {interval}, {start_date.date()} - {end_date.date()}")
+            # Daten von DatePicker holen (geben date-Objekte zurück)
+            start_date = self.start_date_picker.value
+            end_date = self.end_date_picker.value
             
+            # Fallback falls None
+            if not start_date:
+                start_date = (datetime.now() - timedelta(days=90)).date()
+            if not end_date:
+                end_date = datetime.now().date()
+            
+            # Validierung: Start muss vor Ende liegen
+            if start_date > end_date:
+                print(f"⚠️  Start-Datum ({start_date}) ist nach End-Datum ({end_date})")
+                # Tausche die Daten
+                start_date, end_date = end_date, start_date
+                print(f"   → Automatisch korrigiert: {start_date} - {end_date}")
+            
+            # Konvertiere date zu datetime für SQL-Query
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            
+            print(f"📊 Lade Daten: {symbol}, {interval}, {start_date} - {end_date}")
+            
+            # SQL-Query
             with engine.connect() as conn:
-                # WICHTIG: Konvertierung direkt in SQL mit ::float
                 query = text("""
                     SELECT 
                         time,
@@ -172,45 +224,37 @@ class StockDashboard:
                 result = conn.execute(query, {
                     'symbol': symbol,
                     'interval': interval,
-                    'start_date': start_date,
-                    'end_date': end_date
+                    'start_date': start_datetime,
+                    'end_date': end_datetime
                 })
                 
                 rows = result.fetchall()
-                
-                if rows:
-                    df = pd.DataFrame(rows, columns=['time', 'symbol', 'open', 'high', 'low', 'close', 'volume'])
-                    print(f"✅ {len(df)} Datensätze geladen, Typen: {df.dtypes.to_dict()}")
-                else:
-                    print(f"⚠️  Keine Daten gefunden für {symbol}")
-                    df = pd.DataFrame()
+                df = pd.DataFrame(rows, columns=['time', 'symbol', 'open', 'high', 'low', 'close', 'volume']) if rows else pd.DataFrame()
             
-            # Technische Indikatoren hinzufügen (nur wenn genug Daten)
-            if not df.empty and len(df) >= 20:
-                try:
-                    print(f"🔧 Berechne technische Indikatoren...")
-                    df = self.indicators.add_all_indicators(df)
-                    print(f"✅ Indikatoren berechnet")
-                except Exception as e:
-                    print(f"⚠️  Fehler beim Berechnen der Indikatoren: {e}")
-                    import traceback
-                    traceback.print_exc()
-            elif not df.empty:
-                print(f"⚠️  Zu wenig Daten ({len(df)}) für Indikatoren (min. 20 benötigt)")
+            if not df.empty:
+                print(f"✅ {len(df)} Datensätze geladen")
+                
+                # Indikatoren hinzufügen
+                if len(df) >= 20:
+                    try:
+                        df = self.indicators.add_all_indicators(df)
+                        print(f"✅ Indikatoren berechnet")
+                    except Exception as e:
+                        print(f"⚠️  Indikator-Fehler: {e}")
+            else:
+                print(f"⚠️  Keine Daten gefunden für {symbol} im Zeitraum {start_date} - {end_date}")
             
             return df
             
         except Exception as e:
-            print(f"❌ Fehler beim Laden der Daten: {e}")
+            print(f"❌ Fehler: {e}")
             import traceback
             traceback.print_exc()
             return pd.DataFrame()
     
-
     def create_candlestick_chart(self, df):
-        """Erstellt einen Chart mit wählbarem Typ (Candlestick/Line)"""
+        """Erstellt einen Chart mit wählbarem Typ"""
         import plotly.graph_objects as go
-        from plotly.subplots import make_subplots
         
         if df.empty:
             return pn.pane.Markdown(
@@ -219,11 +263,11 @@ class StockDashboard:
             )
         
         fig = go.Figure()
-        
         chart_type = self.chart_type_select.value
         
-        # Candlestick Chart
-        if chart_type in ['Candlestick', 'Beides']:
+        # Chart basierend auf Typ erstellen
+        if chart_type == 'candlestick':
+            # Candlestick Chart
             fig.add_trace(go.Candlestick(
                 x=df['time'],
                 open=df['open'],
@@ -232,107 +276,98 @@ class StockDashboard:
                 close=df['close'],
                 name='OHLC',
                 increasing_line_color='#26a69a',
-                decreasing_line_color='#ef5350',
-                visible=True if chart_type == 'Candlestick' else 'legendonly'
+                decreasing_line_color='#ef5350'
             ))
-        
-        # Linien-Chart (Close-Preis)
-        if chart_type in ['Linie', 'Beides']:
-            fig.add_trace(go.Scatter(
-                x=df['time'],
-                y=df['close'],
-                mode='lines',
-                name='Close',
-                line=dict(
-                    color='#2196f3',
-                    width=2
-                ),
-                visible=True if chart_type == 'Linie' else 'legendonly'
-            ))
-        
-        # High/Low Bereich für Linien-Chart (optional)
-        if chart_type == 'Linie':
-            # High-Linie (gestrichelt)
-            fig.add_trace(go.Scatter(
-                x=df['time'],
-                y=df['high'],
-                mode='lines',
-                name='High',
-                line=dict(color='rgba(38, 166, 154, 0.3)', width=1, dash='dot'),
-                showlegend=False
-            ))
-            # Low-Linie (gestrichelt)
-            fig.add_trace(go.Scatter(
-                x=df['time'],
-                y=df['low'],
-                mode='lines',
-                name='Low',
-                line=dict(color='rgba(239, 83, 80, 0.3)', width=1, dash='dot'),
-                fill='tonexty',
-                fillcolor='rgba(128, 128, 128, 0.1)',
-                showlegend=False
-            ))
-        
-        chart_type = self.chart_type_select.value
-        
-        # Chart Auswahl   
-        if chart_type == 'candlestick':
-            # Candlestick wie vorher
-            pass
+            title_text = "Candlestick Chart"
         
         elif chart_type == 'line_close':
             # Nur Close-Linie
             fig.add_trace(go.Scatter(
-                x=df['time'], y=df['close'],
-                mode='lines', name='Close',
+                x=df['time'], 
+                y=df['close'],
+                mode='lines', 
+                name='Close',
                 line=dict(color='#2196f3', width=2)
             ))
+            title_text = "Close Price"
         
         elif chart_type == 'line_range':
             # Close-Linie mit High/Low Bereich
             fig.add_trace(go.Scatter(
-                x=df['time'], y=df['high'],
-                mode='lines', name='High',
-                line=dict(width=0), showlegend=False
+                x=df['time'], 
+                y=df['high'],
+                mode='lines', 
+                name='High',
+                line=dict(width=0), 
+                showlegend=False
             ))
             fig.add_trace(go.Scatter(
-                x=df['time'], y=df['low'],
-                mode='lines', name='Low',
-                fill='tonexty', fillcolor='rgba(68, 138, 255, 0.2)',
-                line=dict(width=0), showlegend=False
+                x=df['time'], 
+                y=df['low'],
+                mode='lines', 
+                name='Low',
+                fill='tonexty', 
+                fillcolor='rgba(68, 138, 255, 0.2)',
+                line=dict(width=0), 
+                showlegend=False
             ))
             fig.add_trace(go.Scatter(
-                x=df['time'], y=df['close'],
-                mode='lines', name='Close',
+                x=df['time'], 
+                y=df['close'],
+                mode='lines', 
+                name='Close',
                 line=dict(color='#2196f3', width=2)
             ))
+            title_text = "Close Price mit High/Low Range"
         
         elif chart_type == 'area':
             # Area Chart (gefüllte Linie)
             fig.add_trace(go.Scatter(
-                x=df['time'], y=df['close'],
-                mode='lines', name='Close',
+                x=df['time'], 
+                y=df['close'],
+                mode='lines', 
+                name='Close',
                 fill='tozeroy',
                 fillcolor='rgba(33, 150, 243, 0.3)',
                 line=dict(color='#2196f3', width=2)
             ))
+            title_text = "Area Chart"
         
         elif chart_type == 'ohlc':
-            # OHLC Bars (alternative zu Candlesticks)
+            # OHLC Bars
             fig.add_trace(go.Ohlc(
                 x=df['time'],
-                open=df['open'], high=df['high'],
-                low=df['low'], close=df['close'],
+                open=df['open'], 
+                high=df['high'],
+                low=df['low'], 
+                close=df['close'],
                 name='OHLC',
                 increasing_line_color='#26a69a',
                 decreasing_line_color='#ef5350'
             ))
+            title_text = "OHLC Bars"
         
         elif chart_type == 'both':
-            # Candlestick + Line überlagert
-            fig.add_trace(go.Candlestick(...))  # wie vorher
-            fig.add_trace(go.Scatter(...))      # Close-Linie
-
+            # Candlestick + Close-Linie überlagert
+            fig.add_trace(go.Candlestick(
+                x=df['time'],
+                open=df['open'],
+                high=df['high'],
+                low=df['low'],
+                close=df['close'],
+                name='OHLC',
+                increasing_line_color='#26a69a',
+                decreasing_line_color='#ef5350'
+            ))
+            fig.add_trace(go.Scatter(
+                x=df['time'],
+                y=df['close'],
+                mode='lines',
+                name='Close Line',
+                line=dict(color='#2196f3', width=2),
+                visible='legendonly'  # Initial ausgeblendet, kann in Legende aktiviert werden
+            ))
+            title_text = "Candlestick & Line"
         
         # Ausgewählte Indikatoren hinzufügen
         selected_indicators = self.indicator_select.value
@@ -340,8 +375,7 @@ class StockDashboard:
         # Moving Averages
         if 'sma_20' in selected_indicators and 'sma_20' in df.columns:
             fig.add_trace(go.Scatter(
-                x=df['time'], 
-                y=df['sma_20'],
+                x=df['time'], y=df['sma_20'],
                 name='SMA 20', 
                 line=dict(color='orange', width=1.5),
                 mode='lines'
@@ -349,8 +383,7 @@ class StockDashboard:
         
         if 'sma_50' in selected_indicators and 'sma_50' in df.columns:
             fig.add_trace(go.Scatter(
-                x=df['time'], 
-                y=df['sma_50'],
+                x=df['time'], y=df['sma_50'],
                 name='SMA 50', 
                 line=dict(color='blue', width=1.5),
                 mode='lines'
@@ -358,8 +391,7 @@ class StockDashboard:
         
         if 'sma_200' in selected_indicators and 'sma_200' in df.columns:
             fig.add_trace(go.Scatter(
-                x=df['time'], 
-                y=df['sma_200'],
+                x=df['time'], y=df['sma_200'],
                 name='SMA 200', 
                 line=dict(color='purple', width=2),
                 mode='lines'
@@ -367,8 +399,7 @@ class StockDashboard:
         
         if 'ema_12' in selected_indicators and 'ema_12' in df.columns:
             fig.add_trace(go.Scatter(
-                x=df['time'], 
-                y=df['ema_12'],
+                x=df['time'], y=df['ema_12'],
                 name='EMA 12', 
                 line=dict(color='cyan', width=1.5, dash='dash'),
                 mode='lines'
@@ -376,8 +407,7 @@ class StockDashboard:
         
         if 'ema_26' in selected_indicators and 'ema_26' in df.columns:
             fig.add_trace(go.Scatter(
-                x=df['time'], 
-                y=df['ema_26'],
+                x=df['time'], y=df['ema_26'],
                 name='EMA 26', 
                 line=dict(color='magenta', width=1.5, dash='dash'),
                 mode='lines'
@@ -387,24 +417,21 @@ class StockDashboard:
         if 'bollinger' in selected_indicators:
             if 'bb_upper' in df.columns:
                 fig.add_trace(go.Scatter(
-                    x=df['time'], 
-                    y=df['bb_upper'],
+                    x=df['time'], y=df['bb_upper'],
                     name='BB Upper',
                     line=dict(color='gray', width=1, dash='dot'),
                     showlegend=True
                 ))
             if 'bb_middle' in df.columns:
                 fig.add_trace(go.Scatter(
-                    x=df['time'], 
-                    y=df['bb_middle'],
+                    x=df['time'], y=df['bb_middle'],
                     name='BB Middle',
                     line=dict(color='gray', width=1),
                     showlegend=True
                 ))
             if 'bb_lower' in df.columns:
                 fig.add_trace(go.Scatter(
-                    x=df['time'], 
-                    y=df['bb_lower'],
+                    x=df['time'], y=df['bb_lower'],
                     name='BB Lower',
                     line=dict(color='gray', width=1, dash='dot'),
                     fill='tonexty',
@@ -412,14 +439,10 @@ class StockDashboard:
                     showlegend=True
                 ))
         
-        # Layout anpassen
-        chart_type_title = "OHLC" if chart_type == 'Candlestick' else "Close Price"
-        if chart_type == 'Beides':
-            chart_type_title = "OHLC & Close Price"
-        
+        # Layout
         fig.update_layout(
             title=dict(
-                text=f"{self.symbol_select.value} - {chart_type_title} Chart mit Indikatoren",
+                text=f"{self.symbol_select.value} - {title_text} mit Indikatoren",
                 font=dict(size=20)
             ),
             yaxis_title="Preis (USD)",
@@ -438,7 +461,7 @@ class StockDashboard:
         )
         
         return pn.pane.Plotly(fig, sizing_mode='stretch_width', height=600)
-    
+
     def create_volume_chart(self, df):
         """Erstellt einen Volume-Chart"""
         import plotly.graph_objects as go
@@ -596,8 +619,13 @@ class StockDashboard:
     
     def update_chart(self, event=None):
         """Aktualisiert alle Charts"""
-        self.status_indicator.value = True
+    
+        # DEBUG: Was hat das Update getriggert?
+        if event:
+            print(f"🔔 Update getriggert durch: {event.name} = {event.new}")
         
+        self.status_indicator.value = True
+           
         try:
             # Daten laden (mit Indikatoren)
             df = self.load_data()
@@ -642,10 +670,181 @@ class StockDashboard:
         finally:
             self.status_indicator.value = False
     
-    def create_layout(self):
-        """Erstellt das Layout der Anwendung"""
+    def create_ticker_widgets(self):
+        """Erstellt Widgets für Ticker-Verwaltung"""
         
-        # Chart-Container OHNE initiale Daten (werden beim ersten Update geladen)
+        # Asset Class Auswahl
+        self.asset_class_select = pn.widgets.Select(
+            name='Asset Class',
+            options=['stocks', 'crypto', 'forex', 'indices'],
+            value='stocks',
+            width=150
+        )
+        
+        # Laden-Button
+        self.load_tickers_button = pn.widgets.Button(
+            name='📡 Ticker von API laden',
+            button_type='primary',
+            width=200
+        )
+        self.load_tickers_button.on_click(self.load_all_tickers)
+        
+        # Status
+        self.ticker_status = pn.indicators.LoadingSpinner(value=False, width=30, height=30)
+        
+        # Info Text
+        self.ticker_info = pn.pane.Markdown("### 📊 Ticker-Verwaltung\n\nLade Ticker von der API.")
+        
+        # Tabelle für alle Ticker (wird später gefüllt)
+        self.all_tickers_table = pn.widgets.Tabulator(
+            pd.DataFrame(),
+            theme='midnight',
+            layout='fit_columns',
+            pagination='remote',
+            page_size=20,
+            height=500,
+            selectable='checkbox',
+            show_index=False
+        )
+        
+        # Ausgewählte Ticker Tabelle
+        self.update_selected_tickers_table()
+        
+        # Buttons für Ticker-Aktionen
+        self.add_selected_button = pn.widgets.Button(
+            name='➕ Ausgewählte hinzufügen',
+            button_type='success',
+            width=200
+        )
+        self.add_selected_button.on_click(self.add_selected_tickers)
+        
+        self.remove_selected_button = pn.widgets.Button(
+            name='➖ Ausgewählte entfernen',
+            button_type='danger',
+            width=200
+        )
+        self.remove_selected_button.on_click(self.remove_selected_tickers)
+        
+        self.clear_all_button = pn.widgets.Button(
+            name='🗑️ Alle löschen',
+            button_type='warning',
+            width=200
+        )
+        self.clear_all_button.on_click(self.clear_all_tickers)
+    
+    def load_all_tickers(self, event=None):
+        """Lädt alle Ticker von der Massive API"""
+        self.ticker_status.value = True
+        
+        try:
+            asset_class = self.asset_class_select.value
+            tickers = self.massive_client.get_all_tickers(asset_class=asset_class)
+            
+            if tickers:
+                # Konvertiere zu DataFrame
+                df = pd.DataFrame(tickers)
+                
+                # Wähle relevante Spalten
+                columns_to_show = ['ticker', 'name', 'primary_exchange', 'market']
+                available_columns = [col for col in columns_to_show if col in df.columns]
+                df = df[available_columns]
+                
+                # Füge "Ausgewählt" Spalte hinzu
+                df['selected'] = df['ticker'].apply(lambda x: '✅' if self.ticker_db.is_selected(x) else '')
+                
+                # Aktualisiere Tabelle
+                self.all_tickers_table.value = df
+                
+                self.ticker_info.object = f"### ✅ {len(df)} {asset_class} Ticker geladen\n\nWähle Ticker aus und klicke 'Hinzufügen'."
+            else:
+                self.ticker_info.object = "### ⚠️ Keine Ticker gefunden"
+                
+        except Exception as e:
+            self.ticker_info.object = f"### ❌ Fehler: {str(e)}"
+            print(f"❌ Fehler beim Laden der Ticker: {e}")
+        
+        finally:
+            self.ticker_status.value = False
+    
+    def add_selected_tickers(self, event=None):
+        """Fügt ausgewählte Ticker zur Datenbank hinzu"""
+        selected_indices = self.all_tickers_table.selection
+        
+        if not selected_indices:
+            self.ticker_info.object = "### ⚠️ Keine Ticker ausgewählt\n\nWähle Ticker in der Tabelle aus."
+            return
+        
+        df = self.all_tickers_table.value
+        added = 0
+        
+        for idx in selected_indices:
+            row = df.iloc[idx]
+            success = self.ticker_db.add_ticker(
+                ticker=row.get('ticker', ''),
+                name=row.get('name', ''),
+                primary_exchange=row.get('primary_exchange', ''),
+                market=row.get('market', '')
+            )
+            if success:
+                added += 1
+        
+        self.ticker_info.object = f"### ✅ {added} Ticker hinzugefügt"
+        self.update_selected_tickers_table()
+        self.setup_data()  # Aktualisiere verfügbare Symbole
+        self.symbol_select.options = self.available_symbols
+    
+    def remove_selected_tickers(self, event=None):
+        """Entfernt ausgewählte Ticker"""
+        selected_indices = self.selected_tickers_table.selection
+        
+        if not selected_indices:
+            self.ticker_info.object = "### ⚠️ Keine Ticker ausgewählt"
+            return
+        
+        df = self.selected_tickers_table.value
+        removed = 0
+        
+        for idx in selected_indices:
+            ticker = df.iloc[idx]['ticker']
+            if self.ticker_db.remove_ticker(ticker):
+                removed += 1
+        
+        self.ticker_info.object = f"### ✅ {removed} Ticker entfernt"
+        self.update_selected_tickers_table()
+        self.setup_data()
+        self.symbol_select.options = self.available_symbols
+    
+    def clear_all_tickers(self, event=None):
+        """Löscht alle ausgewählten Ticker"""
+        if self.ticker_db.clear_all():
+            self.ticker_info.object = "### ✅ Alle Ticker gelöscht"
+            self.update_selected_tickers_table()
+            self.setup_data()
+            self.symbol_select.options = self.available_symbols
+    
+    def update_selected_tickers_table(self):
+        """Aktualisiert die Tabelle der ausgewählten Ticker"""
+        selected = self.ticker_db.get_selected_tickers()
+        
+        if selected:
+            df = pd.DataFrame(selected)
+        else:
+            df = pd.DataFrame(columns=['ticker', 'name', 'primary_exchange', 'market'])
+        
+        self.selected_tickers_table = pn.widgets.Tabulator(
+            df,
+            theme='midnight',
+            layout='fit_columns',
+            height=300,
+            selectable='checkbox',
+            show_index=False,
+            disabled=False
+        )
+
+    def create_layout(self):
+        """Erstellt das Layout mit Tabs"""
+        
+        # Chart-Container initialisieren (WICHTIG - wurde vergessen!)
         self.main_chart = pn.Column(
             pn.pane.Markdown("### 🔄 Lade Daten...\n\nBitte warten..."),
             sizing_mode='stretch_width',
@@ -653,7 +852,6 @@ class StockDashboard:
         )
         
         self.volume_chart = pn.Column(
-            pn.pane.Markdown(""),
             sizing_mode='stretch_width',
             height=200
         )
@@ -672,43 +870,81 @@ class StockDashboard:
         )
         
         self.stats_table = pn.Column(
-            pn.pane.Markdown("### Statistiken\n\nWerden geladen..."),
+            pn.pane.Markdown("### Statistiken werden geladen..."),
             sizing_mode='stretch_width'
         )
         
-        # Info-Text aktualisieren
+        # TAB 1: Charts & Analyse
+        charts_tab = pn.Column(
+            pn.pane.Markdown(f"# {self.title}"),
+            self.main_chart,
+            self.volume_chart,
+            self.rsi_chart,
+            self.macd_chart,
+            sizing_mode='stretch_width'
+        )
+        
+        # TAB 2: Ticker-Verwaltung
+        ticker_management_tab = pn.Column(
+            pn.pane.Markdown("# 📋 Ticker-Verwaltung"),
+            pn.Row(
+                self.asset_class_select,
+                self.load_tickers_button,
+                self.ticker_status
+            ),
+            self.ticker_info,
+            pn.layout.Divider(),
+            pn.pane.Markdown("## 📊 Alle verfügbaren Ticker"),
+            self.all_tickers_table,
+            pn.Row(
+                self.add_selected_button,
+                self.remove_selected_button
+            ),
+            pn.layout.Divider(),
+            pn.pane.Markdown("## ✅ Meine ausgewählten Ticker"),
+            self.selected_tickers_table,
+            pn.Row(
+                self.clear_all_button
+            ),
+            sizing_mode='stretch_width'
+        )
+        
+        # Tabs erstellen
+        tabs = pn.Tabs(
+            ('📈 Charts', charts_tab),
+            ('📋 Ticker-Verwaltung', ticker_management_tab),
+            dynamic=True
+        )
+        
+        # Info-Text für Sidebar
         info_text = pn.pane.Markdown("""
         ### 📊 Anleitung
         
-        1. **Symbol** auswählen
-        2. **Chart-Typ** wählen
-        3. **Zeitraum** anpassen
-        4. **Interval** wählen
-        5. **Indikatoren** aktivieren
+        **Charts Tab:**
+        - Symbol auswählen
+        - Chart-Typ wählen
+        - Zeitraum mit Kalender
+        - Indikatoren aktivieren
         
-        **Chart-Typen:**
-        - 🕯️ Candlestick: OHLC-Kerzen
-        - 📈 Linie: Close-Preis-Linie
-        - 📊 Beides: Beide überlagert
-        
-        **Verfügbare Indikatoren:**
-        - SMA: Simple Moving Average
-        - EMA: Exponential Moving Average
-        - Bollinger Bands: Volatilitätsbänder
-        - RSI: Relative Strength Index
-        - MACD: Trend-Momentum
+        **Ticker-Verwaltung Tab:**
+        - Ticker von API laden
+        - Auswählen und hinzufügen
+        - Für Charts verfügbar machen
         
         ---
         """)
         
-        # Sidebar mit Controls
+        # Sidebar (für beide Tabs verfügbar)
         sidebar = pn.Column(
             pn.pane.Markdown("## ⚙️ Einstellungen"),
             info_text,
             self.symbol_select,
-            self.chart_type_select,  # ← NEU HINZUGEFÜGT
+            self.chart_type_select,
             self.interval_select,
-            self.date_range_slider,
+            pn.layout.Divider(),
+            pn.pane.Markdown("## 📅 Zeitraum"),
+            self.start_date_picker,
+            self.end_date_picker,
             pn.layout.Divider(),
             pn.pane.Markdown("## 📈 Indikatoren"),
             self.indicator_select,
@@ -720,31 +956,16 @@ class StockDashboard:
             scroll=True
         )
         
-        # Hauptbereich
-        main_area = pn.Column(
-            pn.pane.Markdown(f"# {self.title}"),
-            self.main_chart,
-            self.volume_chart,
-            self.rsi_chart,
-            self.macd_chart,
-            sizing_mode='stretch_width'
-        )
-        
         # Gesamtlayout
         self.layout = pn.template.FastListTemplate(
             title=self.title,
             sidebar=[sidebar],
-            main=[main_area],
+            main=[tabs],
             theme='dark',
             theme_toggle=True,
             header_background='#1f77b4'
-        )
-        
-        # WICHTIG: Initiales Update nach Layout-Erstellung
-        # Verwende pn.state.onload für verzögertes Laden
-        pn.state.onload(self.update_chart)
-
-    
+    )
+  
     def show(self):
         """Zeigt die Anwendung an"""
         return self.layout
