@@ -110,7 +110,8 @@ class MassiveClient:
         Returns:
             List[Dict]: Liste aller Ticker mit Details
         """
-        url = f"{self.base_url}/v3/reference/tickers?market=stocks&active=true&order=asc&limit=1000&sort=ticker&apiKey={self.api_key}"
+        #TODO: Make it more flexible: Now Hard Coded for NASDAQ with Common Stocks
+        url = f"{self.base_url}/v3/reference/tickers?type=CS&market=stocks&exchange=XNAS&active=true&order=asc&limit=1000&sort=ticker&apiKey={self.api_key}"
         
         params = {}
         if active:
