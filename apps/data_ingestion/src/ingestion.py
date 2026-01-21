@@ -23,7 +23,7 @@ class StockDataIngestion:
     """Service zum Laden und Speichern von Stock-Daten über Massive.com API"""
     
     def __init__(self, api_key: str = None):
-        self.client = MassiveClient(api_key=api_key)
+        self.client = MassiveClient()
     
     def _transform_massive_response(self, raw_data: List[Dict], symbol: str) -> pd.DataFrame:
         """
