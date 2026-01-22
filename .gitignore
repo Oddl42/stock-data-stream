@@ -1,5 +1,6 @@
 # Sensible Daten
 .env
+.env_backup
 .env.local
 .env.*.local
 
