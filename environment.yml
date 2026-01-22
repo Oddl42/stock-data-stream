@@ -22,6 +22,7 @@ dependencies:
   - param
   - holoviews
   - tenacity
+  - pydantic-settings
   # Spyder kernel für das Environment
   - spyder-kernels
   # Jupyter (optional, falls du Notebooks nutzen willst)

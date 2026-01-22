@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Thu Jan 22 21:29:50 2026
-
-@author: twi-dev
-"""
-
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
 config.py - Zentrale Konfigurationsverwaltung mit Pydantic
 """
 
@@ -24,6 +16,13 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_PRE_PING: bool = True
+    
+    # ✅ Optionale Legacy-Felder (falls in .env vorhanden, werden sie ignoriert)
+    postgres_user: Optional[str] = None
+    postgres_password: Optional[str] = None
+    postgres_db: Optional[str] = None
+    postgres_host: Optional[str] = None
+    postgres_port: Optional[str] = None
     
     # === Massive API ===
     MASSIVE_API_KEY: str
@@ -52,6 +51,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = 'utf-8'
         case_sensitive = False
+        extra = 'ignore'  # ✅ WICHTIG: Ignoriert unbekannte Felder aus .env
 
 # Globale Settings-Instanz
 settings = Settings()

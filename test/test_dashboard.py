@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Thu Jan 15 15:42:47 2026
+Created on Thu Jan 22 22:07:17 2026
 
 @author: twi-dev
 """
 
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Script für das Dashboard mit automatischer Port-Auswahl
 """
@@ -42,7 +43,9 @@ try:
     print("✅ Dashboard erfolgreich importiert")
 except Exception as e:
     print(f"❌ Import-Fehler: {e}")
-    exit(1)
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)  # ✅ KORRIGIERT: sys.exit statt exit
 
 # Freien Port finden
 try:
@@ -53,9 +56,14 @@ try:
     
     # Server starten
     dashboard.show().show(port=port, threaded=False)
+except KeyboardInterrupt:
+    print("\n\n👋 Dashboard beendet")
+    sys.exit(0)
 except Exception as e:
     print(f"\n❌ Fehler beim Starten: {e}")
+    import traceback
+    traceback.print_exc()
     print("\n💡 Versuche:")
     print("   1. Alle Python-Prozesse beenden: pkill python")
     print("   2. Script erneut ausführen")
-
+    sys.exit(1)
