@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Wed Jan 21 23:27:13 2026
+Created on Thu Jan 22 21:24:34 2026
 
 @author: twi-dev
 """
 
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 data_loader.py – Lädt Daten von Massive API und speichert in TimescaleDB
 """

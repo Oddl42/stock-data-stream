@@ -21,10 +21,12 @@ dependencies:
   - hvplot
   - param
   - holoviews
+  - tenacity
   # Spyder kernel für das Environment
   - spyder-kernels
   # Jupyter (optional, falls du Notebooks nutzen willst)
   - ipykernel
+  
 
   # Pip-only packages
   - pip:
