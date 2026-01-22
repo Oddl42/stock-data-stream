@@ -305,3 +305,74 @@ class MassiveClient:
             return data.get('results', {})
         
         return {}
+    
+    def get_custom_bars(
+        self,
+        symbol: str,
+        limit: int = 5000,
+        timespan: str = 'minute',
+        multiplier: int = 1
+    ) -> List[Dict]:
+        """
+        Lädt Custom Aggregate Bars (für initiales Laden von Streaming-Daten)
+        
+        Args:
+            symbol: Ticker-Symbol
+            limit: Anzahl Bars (max 50000)
+            timespan: 'minute', 'hour', 'day', 'week', 'month'
+            multiplier: Multiplikator (z.B. 5 für 5-Minuten-Bars)
+        
+        Returns:
+            List[Dict]: OHLCV-Daten
+        """
+        from datetime import datetime, timedelta
+        
+        # Zeitraum berechnen (genug für limit Bars)
+        end_date = datetime.now()
+        
+        # Geschätzter Zeitraum basierend auf timespan
+        if timespan == 'minute':
+            days_back = (limit * multiplier) // (60 * 24) + 1  # Minuten -> Tage
+        elif timespan == 'hour':
+            days_back = (limit * multiplier) // 24 + 1
+        else:
+            days_back = limit + 1
+        
+        start_date = end_date - timedelta(days=min(days_back, 730))  # Max 2 Jahre
+        
+        from_date = start_date.strftime('%Y-%m-%d')
+        to_date = end_date.strftime('%Y-%m-%d')
+        
+        url = f"{self.base_url}/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{from_date}/{to_date}"
+        
+        params = {
+            'adjusted': 'true',
+            'sort': 'desc',  # Neueste zuerst
+            'limit': limit
+        }
+        
+        logger.info(f"📊 Custom Bars: {symbol} - {limit} x {multiplier}{timespan}")
+        
+        data = self._make_request(url, params)
+        
+        if not data:
+            return []
+        
+        results = data.get('results', [])
+        
+        if results:
+            ohlcv_data = []
+            for bar in results:
+                ohlcv_data.append({
+                    'time': bar.get('t'),
+                    'open': bar.get('o'),
+                    'high': bar.get('h'),
+                    'low': bar.get('l'),
+                    'close': bar.get('c'),
+                    'volume': bar.get('v')
+                })
+            
+            logger.info(f"✅ {len(ohlcv_data)} Custom Bars geladen")
+            return ohlcv_data
+        
+        return []

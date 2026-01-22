@@ -23,10 +23,12 @@ class DashboardUI:
         self.widgets = {}
         self.ticker_widgets = {}
         self.chart_containers = {}
+        self.streaming_widgets = {}  # ✅ Initialisieren
         
         self._init_chart_containers()
         self.create_widgets()
         self.create_ticker_widgets()
+        self.create_streaming_widgets()  # ✅ WICHTIG: VOR create_layout() aufrufen!
         self.create_layout()
 
     def _init_chart_containers(self):
@@ -301,8 +303,94 @@ class DashboardUI:
         
         self.ticker_widgets['status'] = pn.pane.Markdown("", width=400)
 
-    # === CHART-METHODEN (unverändert aus vorheriger Version) ===
+    def create_streaming_widgets(self):
+        """Erstellt Widgets für Streaming-Tab"""
+        
+        self.streaming_widgets = {}
+        
+        # Ticker-Eingabe
+        self.streaming_widgets['ticker_input'] = pn.widgets.TextInput(
+            name='📊 Ticker-Symbol',
+            placeholder='z.B. AAPL, MSFT, GOOGL',
+            width=300
+        )
+        
+        self.streaming_widgets['add_ticker_btn'] = pn.widgets.Button(
+            name='➕ Hinzufügen',
+            button_type='success',
+            width=150
+        )
+        
+        # Ticker-Liste (als Tabelle)
+        self.streaming_widgets['ticker_list'] = pn.widgets.Tabulator(
+            pd.DataFrame(columns=['ticker', 'status']),
+            theme='default',
+            layout='fit_columns',
+            height=200,
+            selectable='checkbox',
+            show_index=False
+        )
+        
+        self.streaming_widgets['remove_ticker_btn'] = pn.widgets.Button(
+            name='❌ Entfernen',
+            button_type='danger',
+            width=150
+        )
+        
+        # Start/Stop Controls
+        self.streaming_widgets['start_btn'] = pn.widgets.Button(
+            name='▶️ Start Streaming',
+            button_type='success',
+            width=200,
+            height=50
+        )
+        
+        self.streaming_widgets['stop_btn'] = pn.widgets.Button(
+            name='⏹️ Stop Streaming',
+            button_type='danger',
+            width=200,
+            height=50,
+            disabled=True
+        )
+        
+        # Status-Anzeige
+        self.streaming_widgets['status'] = pn.pane.Markdown(
+            "### 📡 Streaming Status\n\n⚪ Bereit zum Starten",
+            styles={'padding': '15px', 'background': '#f5f5f5', 'border-radius': '5px'}
+        )
+        
+        # Streaming-Statistiken
+        self.streaming_widgets['stats'] = pn.pane.Markdown(
+            "### 📊 Statistiken\n\n*Keine Daten*",
+            styles={'padding': '15px'}
+        )
+        
+        # Live-Chart Container
+        self.streaming_widgets['chart'] = pn.Column(
+            pn.pane.Markdown("### 📈 Live-Chart\n\nWähle Ticker und starte Streaming"),
+            sizing_mode='stretch_width',
+            height=600
+        )
+        
+        # Ausgewählter Ticker für Chart
+        self.streaming_widgets['chart_ticker_select'] = pn.widgets.Select(
+            name='📊 Chart-Ticker',
+            options=['Keine Ticker'],
+            width=200
+        )
+        
+        # Anzahl anzuzeigende Datenpunkte
+        self.streaming_widgets['chart_window'] = pn.widgets.IntSlider(
+            name='Chart-Fenster (Datenpunkte)',
+            start=50,
+            end=5000,
+            value=500,
+            step=50,
+            width=300
+        )
     
+    # === CHART-METHODEN (unverändert aus vorheriger Version) ===
+
     def create_candlestick_chart(self, data: pd.DataFrame, chart_type: str = 'candlestick', 
                                   indicators: list = None) -> pn.pane.Plotly:
         """Erstellt ein Chart."""
@@ -718,7 +806,61 @@ class DashboardUI:
             
             sizing_mode='stretch_width'
         )
+        # In create_layout() nach ticker_management_tab:
         
+        # ========================================
+        # TAB 3: Streaming
+        # ========================================
+        
+        streaming_tab = pn.Column(
+            pn.pane.Markdown("# 📡 Echtzeit-Streaming (WebSocket)"),
+            
+            # Ticker-Verwaltung
+            pn.Card(
+                pn.Row(
+                    self.streaming_widgets['ticker_input'],
+                    self.streaming_widgets['add_ticker_btn']
+                ),
+                self.streaming_widgets['ticker_list'],
+                self.streaming_widgets['remove_ticker_btn'],
+                title="📊 Streaming-Ticker verwalten",
+                collapsed=False
+            ),
+            
+            # Streaming Controls
+            pn.Card(
+                pn.Row(
+                    self.streaming_widgets['start_btn'],
+                    self.streaming_widgets['stop_btn']
+                ),
+                self.streaming_widgets['status'],
+                title="🎛️ Streaming-Kontrolle",
+                collapsed=False
+            ),
+            
+            # Live-Chart
+            pn.Card(
+                pn.Row(
+                    self.streaming_widgets['chart_ticker_select'],
+                    self.streaming_widgets['chart_window']
+                ),
+                self.streaming_widgets['chart'],
+                self.streaming_widgets['stats'],
+                title="📈 Live-Chart",
+                collapsed=False
+            ),
+            
+            sizing_mode='stretch_width'
+        )
+        
+        # Tabs erweitern
+        tabs = pn.Tabs(
+            ('📈 Charts', charts_tab),
+            ('📊 Ticker-Verwaltung', ticker_management_tab),
+            ('📡 Streaming', streaming_tab),  # ✅ NEU
+            dynamic=True
+            )
+
         # ========================================
         # Tabs zusammenfügen
         # ========================================
